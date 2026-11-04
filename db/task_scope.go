@@ -314,6 +314,7 @@ target AS (
          lower(regexp_replace(COALESCE(a.icp,''), '[[:space:]]+', '', 'g')) = ts.value
          OR lower(regexp_replace(COALESCE(a.app_icp,''), '[[:space:]]+', '', 'g')) = ts.value
        ))
+    OR (ts.kind='collection' AND a.id IN (SELECT asset_id FROM asset_collection_members WHERE collection_id = ts.collection_id))
   )
 ),
 tested AS (

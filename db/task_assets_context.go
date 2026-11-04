@@ -35,6 +35,7 @@ target AS (
          lower(regexp_replace(COALESCE(a.icp,''), '[[:space:]]+', '', 'g')) = ts.value
          OR lower(regexp_replace(COALESCE(a.app_icp,''), '[[:space:]]+', '', 'g')) = ts.value
        ))
+    OR (ts.kind='collection' AND a.id IN (SELECT asset_id FROM asset_collection_members WHERE collection_id = ts.collection_id))
   )
   JOIN context_tasks ctx ON ctx.task_id=ts.task_id
 	UNION
@@ -84,6 +85,7 @@ target AS (
          lower(regexp_replace(COALESCE(a.icp,''), '[[:space:]]+', '', 'g')) = ts.value
          OR lower(regexp_replace(COALESCE(a.app_icp,''), '[[:space:]]+', '', 'g')) = ts.value
        ))
+    OR (ts.kind='collection' AND a.id IN (SELECT asset_id FROM asset_collection_members WHERE collection_id = ts.collection_id))
   )
   JOIN context_tasks ctx ON ctx.task_id=ts.task_id
 )`
@@ -221,6 +223,7 @@ context_assets AS (
          lower(regexp_replace(COALESCE(a.icp,''), '[[:space:]]+', '', 'g')) = ts.value
          OR lower(regexp_replace(COALESCE(a.app_icp,''), '[[:space:]]+', '', 'g')) = ts.value
        ))
+    OR (ts.kind='collection' AND a.id IN (SELECT asset_id FROM asset_collection_members WHERE collection_id = ts.collection_id))
   )
   JOIN context_tasks ctx ON ctx.task_id=ts.task_id
 )

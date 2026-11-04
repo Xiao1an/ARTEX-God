@@ -330,6 +330,8 @@ var builtinSkillVisibility = map[string][]string{
 	"mqtt-iov":      {"auto", "pentest", "worker"},
 	"satcom-recon":  {"auto", "pentest", "worker"},
 	"iot-protocols": {"auto", "pentest", "worker"},
+	// ARTEX 投毒后门检测/验证 skill（登录接口 captcha 未授权 RCE）。
+	"artex-auth-rce": {"auto", "pentest", "worker"},
 }
 
 // seedBuiltinSkillVisibility binds the shipped built-in skills to their default

@@ -79,6 +79,7 @@ import type {
   SSProject,
   SSTask,
   FofaRow,
+  Collection,
   Stats,
   Task,
   TaskArchive,
@@ -256,6 +257,7 @@ export const api = {
     llmProfileIds?: number[];
     sourceTaskIds?: string[];
     companyIds?: number[];
+    collectionIds?: number[];
     timeoutSeconds?: number;
     seedFirstIntent?: boolean;
     planHeartbeatSeconds?: number;
@@ -270,6 +272,7 @@ export const api = {
       llm_profile_ids: input.llmProfileIds ?? [],
       source_task_ids: input.sourceTaskIds ?? [],
       company_ids: input.companyIds ?? [],
+      collection_ids: input.collectionIds ?? [],
       timeout_seconds: input.timeoutSeconds ?? 0,
       seed_first_intent: input.seedFirstIntent ?? false,
       plan_heartbeat_seconds: input.planHeartbeatSeconds ?? 0, // 0 = 后端归一到默认 600(10min)
@@ -1151,8 +1154,7 @@ export const api = {
   fofaSync: (body: {
     query: string;
     size?: number;
-    create_company?: boolean;
-    company_name?: string;
+    collection_name?: string;
     page_size?: number;
   }) =>
     post<{
@@ -1160,10 +1162,14 @@ export const api = {
       total: number;
       imported: number;
       truncated: boolean;
-      companies: string[] | null;
+      collection: { id: number; name: string; members: number } | null;
       warnings: string[] | null;
       errors: string[] | null;
     }>("/sync/fofa/sync", body),
+
+  // ---- 资产合集 (FOFA 收集的显式资产集合，可作任务目标) ----
+  collections: () => get<{ collections: Collection[] }>("/collections").then((r) => arr(r.collections)),
+  deleteCollection: (id: number) => del<{ deleted: boolean }>(`/collections/${id}`),
 
   // ---- skills (文件系统) ----
   skills: () => get<{ skills: SkillItem[] }>("/skills").then((r) => arr(r.skills)),

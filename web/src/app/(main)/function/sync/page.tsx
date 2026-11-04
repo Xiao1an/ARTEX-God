@@ -15,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import type { FofaRow, SSProject, SSTask } from "@/lib/types";
+import type { Collection, FofaRow, SSProject, SSTask } from "@/lib/types";
 
 type SSStatus = {
   exists: boolean;
@@ -501,6 +501,7 @@ function SyncResult({ result }: { result: Awaited<ReturnType<typeof api.ssSync>>
 function FofaPanel() {
   const [status, setStatus] = React.useState<FofaStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = React.useState(true);
+  const [collectionsReload, setCollectionsReload] = React.useState(0);
 
   const loadStatus = React.useCallback(() => {
     setLoadingStatus(true);
@@ -519,7 +520,7 @@ function FofaPanel() {
     <div className="space-y-4">
       <FofaDataSourceCard status={status} loading={loadingStatus} onChanged={loadStatus} />
       {status?.configured ? (
-        <FofaWorkbench />
+        <FofaWorkbench onImported={() => setCollectionsReload((n) => n + 1)} />
       ) : (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground text-sm">
@@ -527,6 +528,7 @@ function FofaPanel() {
           </CardContent>
         </Card>
       )}
+      <FofaCollections reloadKey={collectionsReload} />
     </div>
   );
 }
@@ -618,11 +620,10 @@ function FofaDataSourceCard({
   );
 }
 
-function FofaWorkbench() {
+function FofaWorkbench({ onImported }: { onImported?: () => void }) {
   const [query, setQuery] = React.useState("");
   const [size, setSize] = React.useState("100");
-  const [createCompany, setCreateCompany] = React.useState(false);
-  const [companyName, setCompanyName] = React.useState("");
+  const [collectionName, setCollectionName] = React.useState("");
   const [previewing, setPreviewing] = React.useState(false);
   const [syncing, setSyncing] = React.useState(false);
   const [rows, setRows] = React.useState<FofaRow[]>([]);
@@ -649,18 +650,18 @@ function FofaWorkbench() {
 
   const runSync = async () => {
     if (!query.trim()) return toast.error("请填写 FOFA 查询语句");
-    if (createCompany && !companyName.trim()) return toast.error("勾选创建企业时请填写企业名称");
     setSyncing(true);
     setResult(null);
     try {
       const r = await api.fofaSync({
         query: query.trim(),
         size: sizeNum,
-        create_company: createCompany,
-        company_name: companyName.trim(),
+        collection_name: collectionName.trim(),
       });
       setResult(r);
-      toast.success(`导入完成，入库 ${r.imported ?? 0} 条资产`);
+      const cname = r.collection?.name || collectionName.trim() || query.trim();
+      toast.success(`已导入 ${r.imported ?? 0} 条资产，归入合集「${cname}」`);
+      onImported?.();
     } catch (e) {
       toast.error(`导入失败：${(e as Error).message}`);
     } finally {
@@ -684,7 +685,7 @@ function FofaWorkbench() {
             onChange={(e) => setQuery(e.target.value)}
           />
           <p className="text-muted-foreground text-xs">
-            用 FOFA 语法检索；预览最多 100 条，导入最多 {sizeNum} 条（上限 5000）。
+            用 FOFA 语法检索；预览最多 100 条，导入最多 {sizeNum} 条（上限 5000）。导入的资产会归入一个「合集」，新建任务时可选它为测试目标。
           </p>
         </div>
 
@@ -695,23 +696,17 @@ function FofaWorkbench() {
             </Label>
             <Input id="fofa-size" className="w-24" value={size} onChange={(e) => setSize(e.target.value)} />
           </div>
-          <label htmlFor="fofa-create-company" className="flex items-center gap-1.5 text-sm">
-            <Checkbox
-              id="fofa-create-company"
-              checked={createCompany}
-              onCheckedChange={(c) => setCreateCompany(!!c)}
-            />
-            创建企业并写入资产范围
-          </label>
-          {createCompany && (
+          <div className="flex min-w-60 flex-1 items-center gap-2">
+            <Label htmlFor="fofa-collection" className="whitespace-nowrap text-sm">
+              合集名
+            </Label>
             <Input
-              className="max-w-xs"
-              placeholder="企业名称"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
+              id="fofa-collection"
+              placeholder="默认用查询语法命名"
+              value={collectionName}
+              onChange={(e) => setCollectionName(e.target.value)}
             />
-          )}
-          <div className="flex-1" />
+          </div>
           <Button variant="outline" onClick={preview} disabled={previewing || syncing}>
             <SearchIcon className={previewing ? "size-4 animate-pulse" : "size-4"} /> 预览
           </Button>
@@ -778,8 +773,10 @@ function FofaResult({ result }: { result: Awaited<ReturnType<typeof api.fofaSync
           </Badge>
         )}
       </div>
-      {result.companies && result.companies.length > 0 && (
-        <p className="text-muted-foreground">新建/更新企业：{result.companies.join("、")}</p>
+      {result.collection && (
+        <p className="text-muted-foreground">
+          已归入合集「{result.collection.name}」（{result.collection.members} 个资产）· 新建任务时可在「关联资产合集」里选它为目标
+        </p>
       )}
       {result.warnings && result.warnings.length > 0 && (
         <ul className="list-inside list-disc text-amber-600 dark:text-amber-500">
@@ -797,5 +794,81 @@ function FofaResult({ result }: { result: Awaited<ReturnType<typeof api.fofaSync
         </ul>
       )}
     </div>
+  );
+}
+
+function FofaCollections({ reloadKey }: { reloadKey: number }) {
+  const [cols, setCols] = React.useState<Collection[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  const load = React.useCallback(() => {
+    setLoading(true);
+    api
+      .collections()
+      .then(setCols)
+      .catch((e) => toast.error(`读取合集失败：${e.message}`))
+      .finally(() => setLoading(false));
+  }, []);
+
+  React.useEffect(() => {
+    load();
+  }, [load, reloadKey]);
+
+  const remove = async (c: Collection) => {
+    if (!confirm(`删除合集「${c.name}」？仅删除该分组与引用它的任务目标，不删除资产本身。`)) return;
+    try {
+      await api.deleteCollection(c.id);
+      toast.success("已删除合集");
+      load();
+    } catch (e) {
+      toast.error(`删除失败：${(e as Error).message}`);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-base">资产合集</CardTitle>
+        <Button variant="ghost" size="sm" onClick={load} disabled={loading}>
+          <RefreshCwIcon className={loading ? "size-4 animate-spin" : "size-4"} /> 刷新
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {cols.length === 0 ? (
+          <p className="py-4 text-center text-muted-foreground text-sm">
+            还没有合集。用上方 FOFA 查询并导入后，会生成一个以查询命名的合集，可在新建任务时选为测试目标。
+          </p>
+        ) : (
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>名称</TableHead>
+                  <TableHead>查询</TableHead>
+                  <TableHead className="text-right">资产数</TableHead>
+                  <TableHead className="w-16" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {cols.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell className="font-medium">{c.name}</TableCell>
+                    <TableCell className="max-w-xs truncate font-mono text-xs" title={c.query}>
+                      {c.query || "—"}
+                    </TableCell>
+                    <TableCell className="text-right">{c.member_count}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="sm" onClick={() => remove(c)}>
+                        删除
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -729,6 +729,33 @@ WHERE t.active_llm_profile_id IS NULL
   AND t.llm_profile_id IS NOT NULL
   AND EXISTS (SELECT 1 FROM task_llm_profiles x WHERE x.task_id=t.id AND x.profile_id=t.llm_profile_id);
 
+-- =====================================================================
+-- 资产合集（Asset Collections）：以 FOFA 查询语法命名、精确冻结一次收集到的
+-- 那批资产的「显式成员清单」。与「企业」不同，合集是显式成员(asset_collection_members)
+-- 而非按规则归并，也不参与 assets.company_id 归属；可作为任务目标
+-- (task_scope kind='collection')。目前由 FOFA 资产同步写入。
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS asset_collections (
+    id         BIGSERIAL PRIMARY KEY,
+    name       TEXT NOT NULL,
+    nkey       TEXT NOT NULL UNIQUE,
+    query      TEXT NOT NULL DEFAULT '',
+    source     TEXT NOT NULL DEFAULT 'fofa',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+DROP TRIGGER IF EXISTS trg_asset_collections_upd ON asset_collections;
+CREATE TRIGGER trg_asset_collections_upd BEFORE UPDATE ON asset_collections
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS asset_collection_members (
+    collection_id BIGINT NOT NULL REFERENCES asset_collections(id) ON DELETE CASCADE,
+    asset_id      BIGINT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (collection_id, asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_collection_members_asset ON asset_collection_members(asset_id);
+
 -- 任务测试范围（资产覆盖度的分母 + 授权边界）。
 --   自动填(source='auto')：insertAssets 顶层按 worker 显式插入的资产类型加保守范围
 --     （root_domain→root_domain，subdomain/service/endpoint→subdomain(host)，ip→ip）；
@@ -738,8 +765,9 @@ WHERE t.active_llm_profile_id IS NULL
 CREATE TABLE IF NOT EXISTS task_scope (
     id          BIGSERIAL PRIMARY KEY,
     task_id     BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    kind        TEXT NOT NULL CHECK (kind IN ('company','root_domain','subdomain','ip','cidr','icp','keyword')),
+    kind        TEXT NOT NULL CHECK (kind IN ('company','root_domain','subdomain','ip','cidr','icp','keyword','collection')),
     company_id  BIGINT REFERENCES companies(id) ON DELETE CASCADE,  -- kind='company'
+    collection_id BIGINT REFERENCES asset_collections(id) ON DELETE CASCADE,  -- kind='collection'
     domain      TEXT,          -- root_domain / subdomain
     net         CIDR,          -- ip / cidr
     value       TEXT,          -- icp / keyword
@@ -749,16 +777,20 @@ CREATE TABLE IF NOT EXISTS task_scope (
 );
 -- 旧库升级：扩展任务范围，使其与企业范围的单文本框识别能力一致。
 ALTER TABLE task_scope ADD COLUMN IF NOT EXISTS value TEXT;
+-- 资产合集作为任务目标：补列 collection_id + 扩 kind 白名单。
+ALTER TABLE task_scope ADD COLUMN IF NOT EXISTS collection_id BIGINT REFERENCES asset_collections(id) ON DELETE CASCADE;
 ALTER TABLE task_scope DROP CONSTRAINT IF EXISTS task_scope_kind_check;
 ALTER TABLE task_scope ADD CONSTRAINT task_scope_kind_check
-    CHECK (kind IN ('company','root_domain','subdomain','ip','cidr','icp','keyword'));
--- 去重：同一 task 的同一条范围只存一次（自动填批量插入靠它幂等）。
+    CHECK (kind IN ('company','root_domain','subdomain','ip','cidr','icp','keyword','collection'));
+-- 去重：同一 task 的同一条范围只存一次（自动填批量插入靠它幂等）。纳入 collection_id。
 DROP INDEX IF EXISTS uq_task_scope;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_task_scope_v2 ON task_scope(
-    task_id, kind, COALESCE(domain,''), COALESCE(net::text,''), COALESCE(company_id,0), COALESCE(value,''));
+DROP INDEX IF EXISTS uq_task_scope_v2;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_task_scope_v3 ON task_scope(
+    task_id, kind, COALESCE(domain,''), COALESCE(net::text,''), COALESCE(company_id,0), COALESCE(collection_id,0), COALESCE(value,''));
 CREATE INDEX IF NOT EXISTS idx_ts_domain  ON task_scope(domain) WHERE kind IN ('root_domain','subdomain');
 CREATE INDEX IF NOT EXISTS idx_ts_net     ON task_scope USING GIST(net inet_ops) WHERE kind IN ('ip','cidr');
 CREATE INDEX IF NOT EXISTS idx_ts_company ON task_scope(company_id) WHERE kind = 'company';
+CREATE INDEX IF NOT EXISTS idx_ts_collection ON task_scope(collection_id) WHERE kind = 'collection';
 
 -- =====================================================================
 -- E. Agents / 提示词模板 / 变量目录

@@ -1389,6 +1389,16 @@ export interface FofaRow {
   server: string;
 }
 
+// Collection — 资产合集：FOFA 等收集的显式资产集合（以查询语法命名），可作任务目标。
+export interface Collection {
+  id: number;
+  name: string;
+  query: string;
+  source: string;
+  member_count: number;
+  created_at: string;
+}
+
 // ConvTokenSummary — one conversation's token total (+ profile/date) for merging
 // chat usage into the dashboard token stats. GET /api/tokens/conversations.
 export interface ConvTokenSummary {

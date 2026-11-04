@@ -124,6 +124,7 @@ import { type SortDirection, useStoredSortPreference } from "@/lib/sort-preferen
 import type {
   AssetInterceptRuleInput,
   ChatAttachment,
+  Collection,
   Company,
   DeleteTaskOptions,
   DeleteTaskResult,
@@ -2657,6 +2658,69 @@ function CompanyPicker({
   );
 }
 
+function CollectionPicker({
+  collections,
+  value,
+  onValueChange,
+  portalContainer,
+}: {
+  collections: Collection[];
+  value: number[];
+  onValueChange: (value: number[]) => void;
+  portalContainer?: React.RefObject<HTMLElement | null>;
+}) {
+  const byID = React.useMemo(() => new Map(collections.map((c) => [String(c.id), c])), [collections]);
+  const ids = React.useMemo(() => collections.map((c) => String(c.id)), [collections]);
+  const selectedIDs = React.useMemo(() => value.map(String), [value]);
+
+  return (
+    <Combobox
+      items={ids}
+      itemToStringValue={(id) => {
+        const c = byID.get(id);
+        return c ? `${c.name} ${c.query}` : id;
+      }}
+      multiple
+      value={selectedIDs}
+      onValueChange={(next) => onValueChange(next.map(Number).filter(Number.isFinite))}
+    >
+      <ComboboxChips>
+        <ComboboxValue>
+          {selectedIDs.map((id) => (
+            <ComboboxChip key={id}>{byID.get(id)?.name ?? `合集 #${id}`}</ComboboxChip>
+          ))}
+        </ComboboxValue>
+        <ComboboxChipsInput id="task-collections" placeholder="搜索合集名称或查询语法" />
+      </ComboboxChips>
+      <ComboboxContent portalContainer={portalContainer}>
+        <ComboboxEmpty>没有匹配的合集</ComboboxEmpty>
+        <ComboboxList>
+          {(id) => {
+            const c = byID.get(id);
+            return (
+              <ComboboxItem key={id} value={id}>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate font-medium">{c?.name ?? `合集 #${id}`}</span>
+                    <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                      {c?.member_count ?? 0} 个资产
+                    </span>
+                  </div>
+                  {c?.query && (
+                    <span className="text-muted-foreground truncate font-mono text-xs" title={c.query}>
+                      {c.query}
+                    </span>
+                  )}
+                </div>
+              </ComboboxItem>
+            );
+          }}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
+  );
+}
+
 type CategoryManagementView = number | "uncategorized" | "new";
 
 function CategoryDropTarget({
@@ -3096,8 +3160,10 @@ function CreateTaskSheet({
   const [selectedTemplateID, setSelectedTemplateID] = React.useState<number | null>(null);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [companies, setCompanies] = React.useState<Company[]>([]);
+  const [collections, setCollections] = React.useState<Collection[]>([]);
   const [sourceTaskIDs, setSourceTaskIDs] = React.useState<string[]>([]);
   const [companyIDs, setCompanyIDs] = React.useState<number[]>([]);
+  const [collectionIDs, setCollectionIDs] = React.useState<number[]>([]);
   const [llmProfileIDs, setLLMProfileIDs] = React.useState<string[]>([]);
   const [creating, setCreating] = React.useState(false);
   const [timeoutMin, setTimeoutMin] = React.useState(""); // 任务级超时(分钟);空/0 = 不限时
@@ -3122,6 +3188,10 @@ function CreateTaskSheet({
       .companies()
       .then(setCompanies)
       .catch(() => setCompanies([]));
+    api
+      .collections()
+      .then(setCollections)
+      .catch(() => setCollections([]));
   }, []);
 
   // pickFiles uploads the chosen files into this draft's staging dir and appends their
@@ -3169,6 +3239,7 @@ function CreateTaskSheet({
         llmProfileIds: llmProfileIDs.map(Number),
         sourceTaskIds: sourceTaskIDs,
         companyIds: companyIDs,
+        collectionIds: collectionIDs,
         timeoutSeconds: timeoutSec,
         seedFirstIntent,
         planHeartbeatSeconds: heartbeatSec,
@@ -3186,6 +3257,7 @@ function CreateTaskSheet({
       setSelectedTemplateID(null);
       setSourceTaskIDs([]);
       setCompanyIDs([]);
+      setCollectionIDs([]);
       setLLMProfileIDs([]);
       setTimeoutMin("");
       setHeartbeatMin("10");
@@ -3342,6 +3414,19 @@ function CreateTaskSheet({
               <FieldDescription>
                 创建任务时会将所选企业当前已有资产加入“测试资产”，并将域名、IP、CIDR、ICP 和企业关键词提供给 Agent
                 作为范围上下文；不会自动生成意图或强制改变执行目标。
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="task-collections">关联资产合集</FieldLabel>
+              <CollectionPicker
+                collections={collections}
+                value={collectionIDs}
+                onValueChange={setCollectionIDs}
+                portalContainer={sheetContentRef}
+              />
+              <FieldDescription>
+                FOFA 等收集到的资产合集。所选合集里的资产会作为本任务的测试目标（覆盖度分母 + 授权边界），
+                并加入“测试资产”。在「资产同步 → FOFA」里查询导入即可生成合集。
               </FieldDescription>
             </Field>
             <Field>
